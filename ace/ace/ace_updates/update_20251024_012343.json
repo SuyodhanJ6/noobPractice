@@ -1,0 +1,15 @@
+{
+  "timestamp": "2025-10-24T01:23:42.219991",
+  "source_feedback_id": "5a9906cb",
+  "total_operations": 1,
+  "operations": [
+    {
+      "operation": "ADD",
+      "bullet_id": null,
+      "content": "SUCCESS PATTERN: When answering 'What is artificial intelligence?...', use this successful pattern: Artificial intelligence (AI) is a branch of computer science that aims to create machines capable of performing tasks that typically require human intelligence. These tasks include reasoning, learning...",
+      "section": "Success Patterns",
+      "helpful_increment": 1,
+      "harmful_increment": 0
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+[
+  {
+    "timestamp": "2025-10-24T01:23:43.238058",
+    "feedback_id": "5a9906cb",
+    "success": true,
+    "insights_generated": 1,
+    "bullets_added": 1,
+    "bullets_updated": 0,
+    "processing_time": 1.01848,
+    "error_message": null
+  },
+  {
+    "timestamp": "2025-10-24T01:24:21.246893",
+    "feedback_id": "5f6e4792",
+    "success": true,
+    "insights_generated": 1,
+    "bullets_added": 1,
+    "bullets_updated": 0,
+    "processing_time": 0.701311,
+    "error_message": null
+  },
+  {
+    "timestamp": "2025-10-24T01:24:55.822324",
+    "feedback_id": "8399f4e5",
+    "success": true,
+    "insights_generated": 1,
+    "bullets_added": 1,
+    "bullets_updated": 0,
+    "processing_time": 0.780499,
+    "error_message": null
+  },
+  {
+    "timestamp": "2025-10-24T01:25:19.259851",
+    "feedback_id": "82bc4460",
+    "success": true,
+    "insights_generated": 1,
+    "bullets_added": 1,
+    "bullets_updated": 0,
+    "processing_time": 0.612955,
+    "error_message": null
+  }
+]

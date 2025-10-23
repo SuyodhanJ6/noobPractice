@@ -1,0 +1,806 @@
+---
+alwaysApply: true
+---
+# Agentic Context Engineering (ACE) - Research Paper Notes
+
+**Paper Link:** [arxiv.org/pdf/2510.04618](http://arxiv.org/pdf/2510.04618)
+
+**Authors:** Qizheng Zhang, Changran Hu, et al. (Stanford University, SambaNova Systems, UC Berkeley)
+
+**Published:** October 2025
+
+---
+
+## 📌 Executive Summary
+
+ACE is a framework that improves LLM performance by treating contexts as **evolving playbooks** rather than static prompts. Instead of modifying model weights, ACE accumulates strategies and lessons through an agentic architecture with three specialized components: Generator, Reflector, and Curator.
+
+**Key Achievement:** ACE matches top-ranked production agents (GPT-4 based) using smaller open-source models (DeepSeek-V3), with +10.6% improvement on agent tasks and +8.6% on domain-specific benchmarks.
+
+---
+
+## 🎯 Core Problem Statement
+
+### Problem 1: Brevity Bias
+
+- Existing prompt optimizers prioritize **concise instructions** over comprehensive knowledge
+- Methods like GEPA value brevity, which drops domain-specific heuristics
+- Example: Detailed API guidelines compress to generic "follow best practices"
+- **Impact:** Poor performance on complex tasks requiring detailed strategies
+
+### Problem 2: Context Collapse
+
+- When LLMs rewrite entire contexts, they catastrophically compress information
+- **Real example from paper:**
+    - Iteration 60: 18,282 tokens, 66.7% accuracy
+    - Iteration 61 (after rewrite): 122 tokens, 57.1% accuracy
+    - Baseline (no context): 63.7%
+    - **Result: Worse than no context!**
+- Monolithic rewriting causes abrupt knowledge loss
+
+---
+
+## 💡 The ACE Solution
+
+### Core Philosophy
+
+**Contexts as Comprehensive Playbooks, Not Concise Summaries**
+
+- LLMs benefit from long, detailed contexts (unlike humans who need brevity)
+- Long-context LLMs (128K+ tokens) can handle extensive information
+- Models autonomously distill relevance at inference time
+- Preserve domain-specific heuristics instead of abstracting them away
+
+---
+
+## 🏗️ Architecture: Three Specialized Agents
+
+### 1. Generator (Task Executor)
+
+**Role:** Solves tasks using the current playbook
+
+**Process:**
+
+1. Receives task + playbook
+2. Identifies relevant strategies/bullets
+3. Generates reasoning trajectory
+4. Produces solution (code, answer, actions)
+5. Marks which bullets were helpful/harmful
+
+**Output:**
+
+- Solution attempt
+- Reasoning trace
+- Bullet feedback (helpful/harmful/neutral)
+
+---
+
+### 2. Reflector (Analyst & Critic)
+
+**Role:** Extracts insights from successes and failures
+
+**Process:**
+
+1. Analyzes Generator's reasoning trace
+2. Compares with ground truth or execution feedback
+3. Identifies specific errors and root causes
+4. Extracts actionable insights
+5. Tags playbook bullets used
+6. Optionally refines analysis over multiple iterations (up to 5)
+
+**Output Format (JSON):**
+
+```json
+{
+  "reasoning": "Detailed analysis...",
+  "error_identification": "Agent used ticker instead of CIK",
+  "root_cause_analysis": "Misunderstood data architecture",
+  "correct_approach": "Use apis.sec.lookup_cik() first",
+  "key_insight": "Always use authoritative source for IDs",
+  "bullet_tags": [
+    {"id": "ctx-00123", "tag": "helpful"},
+    {"id": "ctx-00456", "tag": "harmful"}
+  ]
+}
+```
+
+**Key Innovation:** Dedicated reflection component improves context quality vs. having Generator do everything
+
+---
+
+### 3. Curator (Knowledge Organizer)
+
+**Role:** Maintains and updates the playbook structure
+
+**Process:**
+
+1. Receives Reflector's insights
+2. Identifies novel strategies not in playbook
+3. Creates new bullets for additions
+4. Updates helpful/harmful counters on existing bullets
+5. Organizes bullets by sections
+6. Performs semantic deduplication
+
+**Operations:**
+
+- **ADD:** Create new bullet with fresh ID
+- **UPDATE:** Increment counters
+- **DEDUPLICATE:** Merge semantically similar bullets
+
+---
+
+## 🔑 Key Innovations
+
+### Innovation 1: Structured Bullet System
+
+**Bullet Structure:**
+
+```
+[ctx-00263] helpful=5 harmful=1 ::
+When splitting bills among roommates:
+1. Use Phone API search_contacts() with "roommate" filter
+2. Never rely on transaction descriptions
+3. Calculate equal shares: total / (num_roommates + 1)
+```
+
+**Components:**
+
+- **ID:** Unique identifier (ctx-XXXXX)
+- **Counters:** helpful/harmful tallies
+- **Content:** Actual knowledge/strategy
+- **Metadata:** Section, timestamps
+
+**Benefits:**
+
+- Fine-grained tracking per strategy
+- Selective retrieval (only relevant bullets)
+- Localized updates (no full rewrites)
+- Performance metrics per bullet
+
+---
+
+### Innovation 2: Incremental Delta Updates
+
+**Traditional (Bad):**
+
+```python
+# Full rewrite causes collapse
+new_context = llm.rewrite(old_context)
+```
+
+**ACE (Good):**
+
+```python
+# Incremental updates preserve knowledge
+delta = curator.create_delta(insights)
+playbook.merge(delta)  # Deterministic, no LLM
+```
+
+**Delta Update Process:**
+
+1. Reflector produces insights
+2. Curator creates delta with only NEW bullets or counter updates
+3. Deterministic merge (append + increment)
+4. No regeneration of existing content
+
+**Advantages:**
+
+- ⚡ Fast: No full context rewrite
+- 🛡️ Safe: Preserves existing knowledge
+- 📈 Scalable: O(n) for n new insights, not O(N) for N total
+- 🔄 Parallelizable: Multiple deltas can merge
+
+---
+
+### Innovation 3: Grow-and-Refine Strategy
+
+**Two Phases:**
+
+**GROW Phase:**
+
+- Append new bullets with fresh insights
+- Update counters on existing bullets
+- Accumulate knowledge continuously
+
+**REFINE Phase:**
+
+- Semantic deduplication (using embeddings)
+- Prune low-quality bullets (harmful > helpful)
+- Remove unused bullets
+- Can be proactive (after each update) or lazy (when needed)
+
+**Refinement Timing:**
+
+- **Proactive:** After every delta update
+- **Lazy:** Only when context exceeds 80% of window
+- **Periodic:** Every N updates
+
+---
+
+## 📊 Experimental Results
+
+### Benchmarks Tested
+
+**1. Agent Tasks:**
+
+- **AppWorld:** Autonomous agents interacting with APIs (email, Spotify, Venmo, file system)
+- Difficulty levels: test-normal and test-challenge
+- Metrics: Task Goal Completion (TGC), Scenario Goal Completion (SGC)
+
+**2. Domain-Specific Tasks:**
+
+- **FiNER:** Financial entity recognition in XBRL documents (139 entity types)
+- **Formula:** Numerical reasoning on financial filings
+- Metric: Exact match accuracy
+
+---
+
+### Performance Results
+
+**Agent Benchmark (AppWorld):**
+
+| Method | TGC (normal) | SGC (normal) | TGC (challenge) | SGC (challenge) | Average |
+| --- | --- | --- | --- | --- | --- |
+| ReAct Baseline | 63.7% | 42.9% | 41.5% | 21.6% | 42.4% |
+| ReAct + ICL | 64.3% | 46.4% | 46.0% | 27.3% | 46.0% (+3.6%) |
+| ReAct + GEPA | 64.9% | 44.6% | 46.0% | 30.2% | 46.4% (+4.0%) |
+| ReAct + DC | 65.5% | 58.9% | 52.3% | 30.8% | 51.9% (+9.5%) |
+| **ReAct + ACE** | **76.2%** | **64.3%** | **57.3%** | **39.6%** | **59.4% (+17.0%)** |
+
+**Without Ground Truth Labels:**
+
+- ReAct + ACE: 57.2% (+14.8%) - learns from execution feedback alone
+
+---
+
+**Financial Analysis:**
+
+| Method | FiNER | Formula | Average |
+| --- | --- | --- | --- |
+| Base LLM | 70.7% | 67.5% | 69.1% |
+| ICL | 72.3% | 67.0% | 69.6% (+0.5%) |
+| MIPROv2 | 72.4% | 69.5% | 70.9% (+1.8%) |
+| GEPA | 73.5% | 71.5% | 72.5% (+3.4%) |
+| DC | 74.2% | 69.5% | 71.8% (+2.7%) |
+| **ACE** | **78.3%** | **85.5%** | **81.9% (+12.8%)** |
+
+---
+
+### Leaderboard Achievement
+
+**AppWorld Official Leaderboard (Sept 2025):**
+
+- **IBM CUGA** (GPT-4.1, production): 60.3% average
+- **ReAct + ACE** (DeepSeek-V3, open-source): 59.4% average
+- **On test-challenge split:** ACE surpasses IBM CUGA
+
+**Significance:** Smaller open-source model matches production system through better context engineering
+
+---
+
+## ⚡ Efficiency Analysis
+
+### Adaptation Latency
+
+**Offline (AppWorld):**
+
+- GEPA: 53,898 seconds
+- ACE: 9,517 seconds
+- **Reduction: 82.3%**
+
+**Online (FiNER):**
+
+- Dynamic Cheatsheet: 65,104 seconds
+- ACE: 5,503 seconds
+- **Reduction: 91.5%**
+
+---
+
+### Computational Cost
+
+**Rollouts (Offline):**
+
+- GEPA: 1,434 rollouts
+- ACE: 357 rollouts
+- **Reduction: 75.1%**
+
+**Token Cost (Online):**
+
+- Dynamic Cheatsheet: $17.7
+- ACE: $2.9
+- **Reduction: 83.6%**
+
+---
+
+### Why ACE is Efficient
+
+1. **Incremental updates** - No full context regeneration
+2. **Non-LLM merging** - Deterministic operations
+3. **KV cache reuse** - Modern serving infrastructure optimization
+4. **Parallel processing** - Multiple deltas can merge simultaneously
+5. **Fewer validation rollouts** - Higher quality updates from start
+
+---
+
+## 🔬 Ablation Studies
+
+### Design Component Impact (AppWorld)
+
+| Variant | Average Accuracy | Improvement |
+| --- | --- | --- |
+| Base ReAct | 42.4% | - |
+| ACE w/o Reflector or multi-epoch | 55.1% | +12.7% |
+| ACE w/o multi-epoch | 56.8% | +14.4% |
+| **Full ACE** | **59.4%** | **+17.0%** |
+
+**Key Findings:**
+
+- **Reflector contribution:** +2.6% (dedicated analysis improves quality)
+- **Multi-epoch refinement:** +2.6% (revisiting samples strengthens playbook)
+- **Offline warmup for online:** +3.4% (good initialization helps)
+
+---
+
+## 🛠️ Implementation Details
+
+### Playbook Structure
+
+**Format:** Markdown with structured sections
+
+**Standard Sections:**
+
+1. **Core Strategies** - High-level approaches
+2. **Common Mistakes** - Anti-patterns to avoid
+3. **API Guidelines** - Tool-specific usage patterns
+4. **Domain Concepts** - Specialized knowledge
+5. **Code Snippets** - Reusable implementations
+6. **Verification Checklists** - Quality assurance steps
+
+---
+
+### Handling Context Window Growth
+
+**4 Strategies:**
+
+**1. Lazy Refinement (Deduplication)**
+
+```python
+if playbook_size > 0.8 * context_window:
+    playbook.deduplicate()  # Merge similar bullets
+```
+
+- Uses semantic embeddings (sentence-transformers)
+- Threshold: 0.9 cosine similarity
+- Merges counters: helpful_merged = helpful_1 + helpful_2
+
+**2. Selective Retrieval**
+
+```python
+relevant_bullets = playbook.retrieve_top_k(
+    query=current_task,
+    k=50  # Only top 50 most relevant
+)
+```
+
+- Sends only relevant bullets per task
+- Typically 10% of full playbook
+- Embedding-based similarity search
+
+**3. KV Cache Reuse**
+
+- Cache computed key-value pairs for playbook
+- Reuse across multiple tasks
+- 90%+ latency reduction for repeated content
+- Supported by modern inference engines
+
+**4. Pruning Low-Quality Bullets**
+
+```python
+playbook = [b for b in playbook if b.helpful > b.harmful]
+```
+
+- Remove bullets that hurt more than help
+- Remove unused bullets (helpful = 0)
+- Typically saves 20-30% space
+
+---
+
+### Prompt Engineering
+
+**Generator Prompt Template:**
+
+```
+You are an expert agent with access to a curated playbook.
+
+PLAYBOOK:
+{playbook_markdown}
+
+TASK:
+{task_description}
+
+Instructions:
+1. Read playbook carefully
+2. Identify relevant strategies
+3. Apply them to solve task
+4. Mark which bullets were helpful/harmful
+
+Output: reasoning, bullet_ids, final_answer
+```
+
+**Reflector Prompt Template:**
+
+```
+Diagnose what went wrong in this attempt.
+
+TASK: {task}
+GENERATED SOLUTION: {trajectory}
+GROUND TRUTH: {ground_truth}
+EXECUTION FEEDBACK: {feedback}
+PLAYBOOK BULLETS USED: {bullets}
+
+Analyze:
+1. What specifically went wrong?
+2. Why (root cause)?
+3. What should have been done?
+4. Key insight to remember?
+5. Tag each bullet: helpful/harmful/neutral
+
+Output: JSON with all analysis fields
+```
+
+**Curator Prompt Template:**
+
+```
+Identify NEW insights to add to playbook.
+
+CURRENT PLAYBOOK: {playbook}
+REFLECTOR INSIGHTS: {insights}
+TASK CONTEXT: {task}
+
+Instructions:
+1. Identify ONLY new insights missing from playbook
+2. Avoid redundancy
+3. Create delta updates (ADD operations)
+4. Be concise and actionable
+
+Output: JSON with operations list
+```
+
+---
+
+## 🎓 Learning Without Labels
+
+**ACE can learn from execution feedback alone** (no ground truth needed):
+
+### Feedback Sources:
+
+**1. Code Execution Results**
+
+```python
+try:
+    result = execute(generated_code)
+    feedback = "SUCCESS"
+except Exception as e:
+    feedback = f"ERROR: {e}"
+```
+
+**2. Environment Signals**
+
+- Task completion status
+- Goal achievement indicators
+- API error messages
+- State change verification
+
+**3. Self-Consistency Checks**
+
+```python
+solutions = [Generator(task, playbook) for _ in range(5)]
+if all_agree(solutions):
+    feedback = "HIGH_CONFIDENCE"
+```
+
+**Results Without Labels:**
+
+- AppWorld: 57.2% (vs 42.4% baseline) - +14.8% improvement
+- Demonstrates self-improving capability
+
+---
+
+## 📈 Multi-Epoch Adaptation
+
+### Learning Phases:
+
+**Epoch 1: Discovery**
+
+- Encounter new patterns
+- Make many mistakes
+- Add many new bullets
+- Playbook grows rapidly
+- Focus: Coverage
+
+**Epoch 2: Consolidation**
+
+- Apply learned strategies
+- Fewer new mistakes
+- More counter updates than new bullets
+- Playbook stabilizes
+- Focus: Validation
+
+**Epochs 3-5: Mastery**
+
+- Refine edge cases
+- Prune unhelpful bullets
+- Optimize organization
+- Playbook reaches maturity
+- Focus: Optimization
+
+**Stopping Criteria:**
+
+- Accuracy plateaus
+- No new bullets added for N iterations
+- Max epochs reached (default: 5)
+- Token budget exceeded
+
+---
+
+## 🎯 Use Cases
+
+### 1. Building Coding Agents
+
+**Challenge:** Multiple APIs with different quirks and patterns
+
+**ACE Solution:**
+
+- Accumulates API-specific patterns
+- Stores common error fixes
+- Builds reusable code snippets
+- Tracks which approaches work per API
+
+**Example Bullets:**
+
+```
+[ctx-101] Spotify pagination: Use while True with page_index
+[ctx-102] Phone contacts: Use relationship filter, not name parsing
+[ctx-103] Venmo: Always verify payment before sending confirmation
+```
+
+---
+
+### 2. Domain-Specific Q&A
+
+**Challenge:** Financial analysis requires specialized XBRL knowledge
+
+**ACE Solution:**
+
+- Accumulates domain concepts
+- Stores regulatory requirements
+- Builds formula patterns
+- Tracks entity identification methods
+
+**Example Bullets:**
+
+```
+[ctx-201] XBRL: Use CIK for SEC lookups, never ticker
+[ctx-202] Fiscal periods: Check fiscal_year_end in header
+[ctx-203] Line items: Map standardized names to company-specific
+```
+
+---
+
+### 3. Self-Improving Chatbots
+
+**Challenge:** Customer service needs to learn from interactions
+
+**ACE Solution:**
+
+- Online learning from user interactions
+- Accumulates successful response patterns
+- Stores failure recovery strategies
+- Uses satisfaction scores as feedback
+
+**Example Bullets:**
+
+```
+[ctx-301] Refund requests: Check order status before processing
+[ctx-302] Ambiguous queries: Always clarify before assuming
+[ctx-303] Escalation: Transfer to human if frustration detected
+```
+
+---
+
+## ⚠️ Limitations
+
+### 1. Dependency on Reflector Quality
+
+- If Reflector fails to extract meaningful insights, playbook becomes noisy
+- Requires reasonably capable LLM for reflection
+- Similar to Dynamic Cheatsheet's dependency on curation quality
+
+### 2. Feedback Quality Matters
+
+- Without ground truth or reliable execution signals, adaptation can degrade
+- Example: On financial tasks without labels, performance sometimes dropped
+- Need trustworthy feedback sources for effective learning
+
+### 3. Not Suitable for All Tasks
+
+- Simple tasks benefit more from concise prompts
+- Fixed-strategy problems (e.g., Game of 24) don't need evolving context
+- Tasks with already-embedded knowledge in model weights
+
+**When ACE Excels:**
+
+- ✅ Complex multi-step tasks
+- ✅ Domain-specific reasoning
+- ✅ Tasks with rich feedback signals
+- ✅ Need for interpretability
+- ✅ Continuous adaptation required
+
+**When ACE Not Needed:**
+
+- ❌ Simple classification
+- ❌ Fixed strategies
+- ❌ No feedback available
+- ❌ Concise prompts work fine
+
+---
+
+## 🔮 Future Directions
+
+### 1. Continuous Learning Applications
+
+- Address distribution shifts in production
+- Adapt to changing user behaviors
+- Update domain knowledge as regulations change
+- More cost-effective than continuous fine-tuning
+
+### 2. Selective Unlearning
+
+- Remove outdated information (e.g., deprecated APIs)
+- Address privacy requirements (GDPR, CCPA)
+- Correct misinformation identified by experts
+- Human-interpretable makes auditing feasible
+
+### 3. Multi-Agent Systems
+
+- Share playbooks across agent teams
+- Specialized playbooks per agent role
+- Hierarchical playbook organization
+- Collaborative learning from diverse experiences
+
+### 4. Long-Context Optimization
+
+- Better with longer context windows (GPT-4, Claude, Gemini)
+- KV cache improvements make it more practical
+- Potential for 100K+ token playbooks
+- Memory offloading for extreme scales
+
+---
+
+## 💻 Technical Specifications
+
+### Models Used
+
+- **Base LLM:** DeepSeek-V3.1 (non-thinking mode)
+- **Context Window:** 128,000 tokens
+- **All Components:** Same LLM for Generator, Reflector, Curator (fairness)
+
+### Hyperparameters
+
+- **Batch Size:** 1 (one delta per sample)
+- **Max Reflector Iterations:** 5
+- **Max Epochs (Offline):** 5
+- **Deduplication Threshold:** 0.9 cosine similarity
+- **Retrieval Top-K:** 50 bullets per task
+
+### Semantic Similarity
+
+- **Model:** sentence-transformers/all-MiniLM-L6-v2
+- **Metric:** Cosine similarity
+- **Purpose:** Deduplication and retrieval
+
+---
+
+## 📚 Related Work
+
+### Agent Memory Systems
+
+- **Dynamic Cheatsheet:** Test-time learning with adaptive memory (foundation for ACE)
+- **AgentFly:** Extensible framework with evolving memory
+- **AWM (Agent Workflow Memory):** Reusable workflow templates
+- **A-MEM:** Zettelkasten-inspired structured memory
+- **Agentic Plan Caching:** Cost-efficient plan template reuse
+
+**ACE's Distinction:**
+
+- Broader scope: System prompts + memory + evidence
+- Addresses brevity bias and context collapse explicitly
+- Evaluates cost, latency, and scalability (not just accuracy)
+
+### Prompt Optimization
+
+- **Reflexion:** Verbal reinforcement learning
+- **TextGrad:** Gradient-like textual feedback
+- **GEPA:** Genetic-Pareto prompt evolution
+- **MIPROv2:** Joint instruction and demonstration optimization
+
+**ACE's Advantage:**
+
+- Comprehensive playbooks vs. concise prompts
+- Incremental updates vs. full rewrites
+- Structured bullets vs. monolithic text
+
+---
+
+## 🎬 Key Takeaways
+
+### Core Insights
+
+1. **Comprehensive > Concise** (for LLMs)
+    - LLMs excel with detailed contexts
+    - Humans need brevity, LLMs don't
+    - Long contexts enable autonomous relevance extraction
+2. **Incremental > Monolithic**
+    - Prevents context collapse
+    - Preserves accumulated knowledge
+    - Scales efficiently
+3. **Structured > Unstructured**
+    - Enables fine-grained tracking
+    - Supports selective retrieval
+    - Facilitates targeted updates
+4. **Evolving > Static**
+    - Continuous improvement from experience
+    - Adapts to new patterns
+    - Self-improving systems
+
+### Practical Implications
+
+**For Researchers:**
+
+- Context engineering as important as model architecture
+- Need for frameworks that prevent knowledge loss
+- Importance of structured context representations
+
+**For Practitioners:**
+
+- Can match expensive production systems with smaller models
+- Interpretable alternative to fine-tuning
+- Enables rapid domain adaptation
+
+**For ML Systems:**
+
+- Long-context optimizations increasingly valuable
+- KV cache reuse critical for efficiency
+- Context as first-class learnable component
+
+---
+
+## 📖 Citation
+
+```
+@article{zhang2025ace,
+  title={Agentic Context Engineering: Evolving Contexts for Self-Improving Language Models},
+  author={Zhang, Qizheng and Hu, Changran and Upasani, Shubhangi and Ma, Boyuan and Hong, Fenglu and Kamanuru, Vamsidhar and Rainton, Jay and Wu, Chen and Ji, Mengmeng and Li, Hanchen and Thakker, Urmish and Zou, James and Olukotun, Kunle},
+  journal={arXiv preprint arXiv:2510.04618},
+  year={2025}
+}
+```
+
+---
+
+## 🔗 Resources
+
+- **Paper:** [arxiv.org/pdf/2510.04618](http://arxiv.org/pdf/2510.04618)
+- **AppWorld Leaderboard:** [appworld.dev/leaderboard](http://appworld.dev/leaderboard)
+- **Dynamic Cheatsheet (Foundation):** Referenced as [41] in paper
+- **DSPy Implementation:** GEPA and MIPROv2 integrations
+
+---
+
+## 📝 Personal Notes / Action Items
+
+*Add your own insights, questions, or implementation plans here...*
+
+---
+
+**Last Updated:** October 13, 2025
